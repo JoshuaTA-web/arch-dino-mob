@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Arch-Dino</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    canvas {
+      background: #f0f0f0;
+      display: block;
+      margin: 0 auto;
+      border: 2px solid #333;
+      touch-action: manipulation;
+    }
+    #restartBtn {
+      display: none;
+      margin: 10px auto;
+      padding: 10px 20px;
+      background-color: #333;
+      color: #fff;
+      border: none;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    #scoreBoard {
+      text-align: center;
+      font-family: sans-serif;
+      font-size: 18px;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="800" height="300"></canvas>
+<div id="scoreBoard">Score: <span id="score">0</span></div>
+<button id="restartBtn">Restart Game</button>
+
+<script>
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const restartBtn = document.getElementById('restartBtn');
+  const scoreDisplay = document.getElementById('score');
+
+  let dino = { x: 50, y: 250, width: 50, height: 50, vy: 0, gravity: 1.5, isJumping: false };
+  let obstacles = [];
+  let backgroundElements = [];
+  let score = 0;
+  let gameOver = false;
+  let craneX = 800;
+  let craneDirection = -1;
+  let speedMultiplier = 1;
+  let dayTime = true;
+  let colorTransition = 0;
+  const stars = Array.from({ length: 50 }, () => ({
+    x: Math.random() * canvas.width,
+    y: Math.random() * 100,
+    radius: Math.random() * 1.5 + 0.5,
+    alpha: Math.random(),
+    direction: Math.random() > 0.5 ? 1 : -1
+  }));
+  let sunImg = new Image();
+  let moonImg = new Image();
+  let skyObjectX = canvas.width;
+  sunImg.src = 'sun.png';
+  moonImg.src = 'moon.png';
+
+  const dinoImg = new Image();
+  dinoImg.src = 'archdino.png';
+
+  const obstacleImages = {
+    box: new Image(),
+    cone: new Image(),
+    sign: new Image(),
+    chair: new Image()
+  };
+
+  obstacleImages.box.src = 'box.png';
+  obstacleImages.cone.src = 'cone.png';
+  obstacleImages.sign.src = 'deadline.png';
+  obstacleImages.chair.src = 'chair.png';
+
+  const skyline = new Image();
+  skyline.src = 'skyline.png';
+
+  const crane = new Image();
+  crane.src = 'crane.png';
+
+  const jumpSound = new Audio('jump.wav');
+jumpSound.volume = 1.0;
+jumpSound.load();
+  const crashSound = new Audio('crash.wav');
+crashSound.volume = 1.0;
+crashSound.load();
+
+  function resetGame() {
+    dino.y = 250;
+    dino.vy = 0;
+    obstacles = [];
+    backgroundElements = [{ x: 0 }, { x: 800 }];
+    score = 0;
+    speedMultiplier = 1;
+    gameOver = false;
+    restartBtn.style.display = 'none';
+    loop();
+  }
+
+  function createObstacle() {
+    const types = ['box', 'cone', 'sign', 'chair'];
+    const type = types[Math.floor(Math.random() * types.length)];
+    obstacles.push({ x: canvas.width, y: 260, width: 40, height: 40, type: type });
+  }
+
+  function drawObstacles() {
+    obstacles.forEach(obs => {
+      ctx.drawImage(obstacleImages[obs.type], obs.x, obs.y, obs.width, obs.height);
+      obs.x -= 5 * speedMultiplier;
+    });
+    obstacles = obstacles.filter(obs => obs.x + obs.width > 0);
+  }
+
+  function drawBackground() {
+    // Day/Night cycle transition
+    if (score % 1000 === 0 && score !== 0) {
+      dayTime = !dayTime;
+    }
+    const color = dayTime ? 240 : 160;
+    const bgColor = `rgb(${color}, ${color}, ${color})`;
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Smooth background transition (optional blend)
+    ctx.fillStyle = `rgba(${color}, ${color}, ${color}, 0.1)`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    canvas.style.backgroundColor = bgColor;
+
+    backgroundElements.forEach(bg => {
+      ctx.drawImage(skyline, bg.x, 100, 800, 200);
+      bg.x -= 2;
+    });
+    if (backgroundElements[backgroundElements.length - 1].x <= 0) {
+      backgroundElements.push({ x: 800 });
+    }
+    backgroundElements = backgroundElements.filter(bg => bg.x + 800 > 0);
+
+    
+
+    // Move crane hook across the screen
+    craneX += craneDirection * 2;
+    if (craneX <= -40 || craneX >= canvas.width) craneDirection *= -1;
+    
+
+    // Twinkling stars
+    if (!dayTime) {
+      stars.forEach(star => {
+        ctx.beginPath();
+        ctx.globalAlpha = star.alpha;
+        ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2);
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+        ctx.globalAlpha = 1.0;
+        star.alpha += 0.02 * star.direction;
+        if (star.alpha <= 0 || star.alpha >= 1) star.direction *= -1;
+      });
+    }
+
+    // Move sun or moon behind crane
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+    ctx.shadowBlur = 10;
+    if (dayTime) {
+      ctx.drawImage(sunImg, skyObjectX, 20, 40, 40);
+    } else {
+      ctx.drawImage(moonImg, skyObjectX, 20, 40, 40);
+    }
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = 'transparent';
+    skyObjectX -= 0.5;
+    if (skyObjectX < -40) skyObjectX = canvas.width;
+
+    // Draw crane with glowing shadow (after sun/moon)
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
+    ctx.shadowBlur = 15;
+    ctx.drawImage(crane, craneX, 0, 40, 100);
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = 'transparent';
+    if (skyObjectX < -40) skyObjectX = canvas.width;
+  }
+
+  function detectCollision() {
+    for (let obs of obstacles) {
+      if (
+        dino.x < obs.x + obs.width &&
+        dino.x + dino.width > obs.x &&
+        dino.y < obs.y + obs.height &&
+        dino.y + dino.height > obs.y
+      ) {
+        crashSound.play().catch(e => console.log('Crash sound error:', e));
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function drawDino() {
+    ctx.drawImage(dinoImg, dino.x, dino.y, dino.width, dino.height);
+  }
+
+  function loop() {
+    if (gameOver) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    drawBackground();
+
+    dino.y += dino.vy;
+    dino.vy += dino.gravity;
+    if (dino.y > 250) {
+      dino.y = 250;
+      dino.vy = 0;
+      dino.isJumping = false;
+    }
+
+    drawDino();
+    drawObstacles();
+
+    if (detectCollision()) {
+      gameOver = true;
+      restartBtn.style.display = 'block';
+      return;
+    }
+
+    score++;
+    scoreDisplay.innerText = Math.floor(score / 10);
+
+    if (score % 150 === 0) {
+      createObstacle();
+    }
+
+    if (score % 300 === 0) {
+      speedMultiplier += 0.2;
+    }
+
+    requestAnimationFrame(loop);
+  }
+
+  function handleJump() {
+    jumpSound.play().catch(e => console.log('Jump sound error:', e));
+    if (gameOver) {
+      resetGame();
+      return;
+    }
+    if (!dino.isJumping) {
+      dino.vy = -20;
+      dino.isJumping = true;
+    }
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.code === 'Space') handleJump();
+  });
+
+  canvas.addEventListener('touchstart', () => {
+    handleJump();
+  });
+
+  restartBtn.addEventListener('click', resetGame);
+
+  dinoImg.onload = () => {
+    resetGame();
+  };
+</script>
+
+</body>
+</html>
